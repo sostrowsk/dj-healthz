@@ -19,6 +19,10 @@ The only hard dependency is Django; redis, kombu/celery etc. are optional.
 ## Install
 
 ```bash
+# public GitHub mirror (no ssh key needed, e.g. in Docker builds)
+poetry add git+https://github.com/sostrowsk/dj-healthz.git#main
+
+# or via GitLab (addvendo-intern)
 poetry add git+ssh://git@gitlab.com/addvendo/dj-healthz.git#main
 ```
 

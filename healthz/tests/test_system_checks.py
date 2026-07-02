@@ -1,3 +1,6 @@
+import sys
+import types
+
 from django.test import override_settings
 
 from healthz.checks import broker, cache, redis
@@ -41,6 +44,26 @@ class TestE002:
     }})
     def test_available_dependency_is_clean(self):
         assert check_healthz_config(None) == []
+
+    @override_settings(HEALTHZ={"CHECKS": {
+        "satisfied": {"check": "healthz.tests.fake_requires_specless.check"},
+    }})
+    def test_imported_dependency_without_spec_is_clean(self, monkeypatch):
+        # Regression: kombu 5.x replaces its module object with a lazy
+        # subclass whose __spec__ is None; importlib.util.find_spec raised
+        # ValueError and crashed `manage.py check` in every Celery host.
+        module = types.ModuleType("fake_specless_dep")
+        module.__spec__ = None
+        monkeypatch.setitem(sys.modules, "fake_specless_dep", module)
+        assert check_healthz_config(None) == []
+
+    @override_settings(HEALTHZ={"CHECKS": {
+        "satisfied": {"check": "healthz.tests.fake_requires_specless.check"},
+    }})
+    def test_none_module_sentinel_counts_as_missing(self, monkeypatch):
+        # sys.modules[name] = None is Python's "import blocked" sentinel.
+        monkeypatch.setitem(sys.modules, "fake_specless_dep", None)
+        assert ids(check_healthz_config(None)) == ["healthz.E002"]
 
     @override_settings(HEALTHZ={"CHECKS": {
         "needy": {"check": "healthz.tests.fake_requires.check"},

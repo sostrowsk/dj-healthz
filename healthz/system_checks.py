@@ -12,6 +12,16 @@ from healthz import conf, registry
 PROBE_PATHS = ("healthz", "livez", "readyz", "health/")
 
 
+def _dependency_missing(name: str) -> bool:
+    # Already-imported modules are present even when their __spec__ is None
+    # (kombu 5.x installs a lazy module subclass) — find_spec would raise
+    # ValueError for them instead of answering. A None entry is Python's
+    # "import blocked" sentinel and must still count as missing.
+    if sys.modules.get(name) is not None:
+        return False
+    return util.find_spec(name) is None
+
+
 @checks.register()
 def check_healthz_config(app_configs, **kwargs):
     messages = []
@@ -36,7 +46,7 @@ def check_healthz_config(app_configs, **kwargs):
         if explicit:
             module = sys.modules.get(func.__module__)
             for dependency in getattr(module, "REQUIRES", ()):
-                if util.find_spec(dependency) is None:
+                if _dependency_missing(dependency):
                     messages.append(checks.Error(
                         f"HEALTHZ check '{check.name}' requires the missing optional "
                         f"dependency '{dependency}'.",

@@ -10,8 +10,10 @@ arznei-muster-mello**. Später: expertdaq, AI-Bilanz-Scanner, second-brain-v2.
 
 1. **Branch** `feat/dj-healthz` vom aktuellen HEAD. Keine fremden dirty
    Files anfassen; nur Migrations-Dateien stagen. **Kein Push.**
-2. **Dependency**: `dj-healthz = {git = "git@gitlab.com:addvendo/dj-healthz.git", branch = "main"}`
-   in pyproject.toml (poetry lock + install).
+2. **Dependency**: `dj-healthz = {git = "https://github.com/sostrowsk/dj-healthz.git", branch = "main"}`
+   in pyproject.toml (poetry lock + install). **Öffentliche GitHub-HTTPS-URL,
+   nicht GitLab-SSH** — Docker-/CI-Builds haben keinen SSH-Key; eine
+   ssh-Dependency bricht `poetry install` in jedem Image-Build.
 3. **Settings**: `"healthz"` in `INSTALLED_APPS`; `HEALTHZ`-Dict nach
    Projektprofil (unten); `ALLOWED_HOSTS` um `localhost`/`127.0.0.1`
    ergänzen (falls fehlt); bei `SECURE_SSL_REDIRECT=True` die

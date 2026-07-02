@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "dj-healthz"
+version = "0.1.0"
+description = "Reusable Django app providing liveness/readiness/diagnostics health endpoints (healthz, livez, readyz, health) with timeout-bounded, pluggable checks."
+authors = ["Stefan Ostrowski <ostrowski@addvendo.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{ include = "healthz" }]
+include = [
+    { path = "healthz/deploy/**/*", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+django = ">=5,<7"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8"
+pytest-django = "^4"
+flake8 = "^7"
+isort = "^6"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.isort]
+profile = "black"
+line_length = 99
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "healthz.tests.settings"
+testpaths = ["healthz/tests"]
+python_files = ["test_*.py"]

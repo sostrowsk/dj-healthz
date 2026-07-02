@@ -92,6 +92,23 @@ arznei-muster-mello**. Später: expertdaq, AI-Bilanz-Scanner, second-brain-v2.
   (verifizieren, sonst auf `/readyz` umstellen und das im Commit
   dokumentieren). robots.txt-Disallow bleibt.
 
+### expertdaq (Django 5.2) — Wave 2, opus4.8
+- Entfernen: `expertdaq/health_checks.py` (inkl. des nie gerouteten
+  `simple_health_check`-Dead-Codes) + URL-Eintrag `/health/`. Der dort
+  referenzierte Milvus-Check ist seit jeher tot (Import eines nicht
+  existierenden Moduls, permanent `skipped`) — ersatzlos streichen, es
+  sei denn, ein funktionierender scribe-Helper mit dict-Contract ist
+  vorhanden. **Behalten**: `expertdaq/tasks/redis_health.py`
+  (Beat-Metriken, auch wenn aktuell nicht exponiert).
+- `HEALTHZ`: SERVICE_ID expertdaq; CHECKS: database, cache
+  (memcached-Backend über Django-Cache — kein eigener Alias nötig),
+  redis (REDIS_HOST/CELERY_BROKER_URL-Konvention wie leasing), broker
+  {critical: False}, celery_workers {critical: False} + Beat-Schedule
+  `healthz.tasks.probe_workers` (expires 59), filesystem, storage
+  {critical: False, readiness: False}.
+- Alter Pfad `/health/` bleibt von dj-healthz serviert (JSON-Format
+  ändert sich auf health+json — Statuscodes bleiben 200/503).
+
 ## Verifikation (pro Projekt, sonnet5)
 
 - `manage.py check` ohne healthz-Errors; `manage.py makemigrations

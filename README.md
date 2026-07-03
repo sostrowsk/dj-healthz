@@ -16,6 +16,10 @@ orchestrator's timeout.
 Requires Python ≥ 3.11 and Django ≥ 5.0 (tested on 5.2 and 6.0).
 The only hard dependency is Django; redis, kombu/celery etc. are optional.
 
+In production since 2026-07 in leasing, tinakylau, acceed, jeanmarcel,
+arznei-muster-mello, lexsource and expertdaq — per-project configs and
+rollout steps in [docs/MIGRATION.md](docs/MIGRATION.md).
+
 ## Install
 
 ```bash
@@ -116,6 +120,15 @@ Register it via `"my-thing": {"check": "myapp.checks.check"}`. Never put raw
 exception text into the dict — log it and set `error_class` instead.
 
 ## Celery worker heartbeat
+
+**Prerequisite:** the heartbeat flows through Django's `default` cache, so
+web and worker containers must share that cache backend (Redis or a shared
+memcached). With a *per-container* cache (e.g. local memcached per
+container) the worker's probe can never reach the web process — the check
+would be a permanent `StaleProbe` error. In that setup leave
+`celery_workers` out (like expertdaq does) until the heartbeat can target a
+shared store; a configurable cache alias for the heartbeat is on the
+backlog.
 
 The `celery_workers` check needs the shipped beat task:
 

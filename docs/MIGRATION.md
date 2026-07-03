@@ -1,124 +1,97 @@
-# dj-healthz — Host Migration Plan
+# dj-healthz — Host-Migration
 
 Migration der Bestandsprojekte auf `dj-healthz` (Basis: [SURVEY.md](SURVEY.md),
 Verhalten: [SPEC.md](SPEC.md), Nutzung: [../README.md](../README.md)).
 
-Wave 1 (dieser Plan): **tinakylau, leasing, jeanmarcel, acceed, lexsource,
-arznei-muster-mello**. Später: expertdaq, AI-Bilanz-Scanner, second-brain-v2.
+## Status (2026-07-02: Wave 1 + 2 abgeschlossen)
 
-## Grundrezept (jedes Projekt)
+Alle 7 Projekte migriert, MRs gegen **staging** gemerged, Pipelines grün,
+Feature-Branches (lokal + remote) aufgeräumt:
+
+| Projekt | MR | Merge | Checks (HEALTHZ) |
+|---|---|---|---|
+| leasing | !129 | `48d6136` | database, cache, redis, broker, celery_workers*, filesystem, storage†, milvus* (scribe) |
+| tinakylau | !24 | `6f42eb0` | database, cache, broker (amqp), celery_workers*, filesystem, staticfiles, storage† |
+| acceed | !180 | FF `fba68b8` | database, cache, redis*, broker* |
+| jeanmarcel | !83 | `5eb79c3` | database, cache |
+| arznei-muster-mello | !6 | `7e268a7` | Zero-Config (database, cache) |
+| lexsource | !2 | FF `f6016bd` | database, staticfiles, migrations |
+| expertdaq | !178 | `1f5bc94` | database, cache, redis, broker*, filesystem, storage† — **ohne celery_workers** (s. u.) |
+
+\* non-critical · † non-critical + `readiness: False` · FF = Fast-Forward-Merge
+
+**Noch nicht migriert (Wave 3, optional):** AI-Bilanz-Scanner, second-brain-v2.
+
+## Offene Rollout-Schritte (nach Deploy)
+
+1. **Externe Uptime-Monitore auf `/readyz` umstellen.** Die alten
+   Liveness-Pfade (`/healthz`, leasing `/health/simple`) machten `SELECT 1`
+   und lieferten bei DB-Ausfall 500 — die neuen Liveness-Endpoints sind per
+   Design **immer 200**. Das DB-Ausfall-Signal liegt jetzt auf `/readyz`.
+   Container-HEALTHCHECKs ebenfalls auf `/readyz` (insb. tinakylaus
+   `docker-healthcheck.sh`, web-Zweig).
+2. **`APP_VERSION` / `ENVIRONMENT`** env-Vars in Deploy setzen, damit
+   `releaseId`/`notes` in `/health/` gefüllt sind.
+3. **expertdaq:** (a) robots.txt `Disallow: /health` committen (lag nur im
+   Working Tree); (b) beim debian13→staging-Merge braucht dessen
+   Playwright-`test_e2e.py` die 200/503-Anpassung (fertig im
+   debian13-basierten Commit `5c334335`); (c) `celery_workers`-Check
+   reaktivieren, sobald der Heartbeat einen web/worker-geteilten Store hat —
+   der Django-Default-Cache ist dort per-Container-memcached, der Check wäre
+   permanent `StaleProbe` (Begründung als Kommentar in settings.py; Paket-
+   Backlog: Cache-Alias-Option für `celery_workers`/`probe_workers`).
+
+## Grundrezept (für Wave 3 / neue Projekte)
 
 1. **Branch** `feat/dj-healthz` vom aktuellen HEAD. Keine fremden dirty
-   Files anfassen; nur Migrations-Dateien stagen. **Kein Push.**
+   Files stagen. Kein Push vor grünem Gate; **MR immer gegen `staging`** —
+   nie production. Zweigt die Arbeit von einem anderen Branch ab
+   (production, debian13, …), den Migration-Commit vor dem MR per
+   Cherry-Pick auf `origin/staging` umsetzen, damit der Diff nur die
+   Migration enthält.
 2. **Dependency**: `dj-healthz = {git = "https://github.com/sostrowsk/dj-healthz.git", branch = "main"}`
    in pyproject.toml (poetry lock + install). **Öffentliche GitHub-HTTPS-URL,
    nicht GitLab-SSH** — Docker-/CI-Builds haben keinen SSH-Key; eine
    ssh-Dependency bricht `poetry install` in jedem Image-Build.
 3. **Settings**: `"healthz"` in `INSTALLED_APPS`; `HEALTHZ`-Dict nach
-   Projektprofil (unten); `ALLOWED_HOSTS` um `localhost`/`127.0.0.1`
-   ergänzen (falls fehlt); bei `SECURE_SSL_REDIRECT=True` die
-   `SECURE_REDIRECT_EXEMPT`-Patterns aus dem README.
+   Projektbedarf (Criticality-Flags explizit setzen — Registry-Default ist
+   `critical: True`!); `ALLOWED_HOSTS` um `localhost`/`127.0.0.1` ergänzen;
+   bei `SECURE_SSL_REDIRECT=True` die `SECURE_REDIRECT_EXEMPT`-Patterns aus
+   dem README.
 4. **URLs**: `path("", include("healthz.urls"))` **außerhalb**
    `i18n_patterns`. Alte Health-URLs entfernen. Extern konsumierte
-   Alt-Pfade, die dj-healthz nicht serviert (z. B. `/health/simple`),
-   als Alias auf `healthz.views.healthz` erhalten — niemals einen von
-   Monitoren/Dockern konsumierten Pfad stillegen.
+   Alt-Pfade, die dj-healthz nicht serviert, als Alias auf
+   `healthz.views.healthz` erhalten — niemals einen von Monitoren/Dockern
+   konsumierten Pfad stilllegen (vorher Dockerfile/compose/Ansible/nginx/
+   cron/Frontend greppen).
 5. **Alt-Code entfernen — konservativ**: nur die Health-*Endpoint*-
-   Implementierung (health_checks.py / Views) löschen. Hintergrund-Tasks,
-   Monitoring-Dashboards und Metrik-Infrastruktur, die andernorts
-   konsumiert werden, bleiben (leasing `/monitoring/redis/`, tinakylau
-   RabbitMQ-Metriken).
+   Implementierung löschen. Hintergrund-Tasks, Monitoring-Dashboards und
+   Metrik-Infrastruktur, die andernorts konsumiert werden, bleiben.
 6. **Tests (TDD)**: bestehende Health-Tests auf das neue Verhalten
-   portieren (Pfad, Statuscodes 200/503, plain vs. health+json) — erst
-   RED gegen den unmigrierten Stand prüfen, dann migrieren, dann GREEN.
-   Mindest-Smoke pro Projekt: `/healthz` 200 plain, `/readyz` 200,
-   `/health/` `application/health+json`, POST 405, kein Locale-Redirect.
-7. **Gate**: Projekt-Lint/Tests (flake8 + isort + pytest bzw.
-   Projektstandard) + `codex review --uncommitted`; P1 fixen.
-8. **Ein atomarer Commit** auf dem Branch (Migration + Tests).
+   portieren (RED gegen unmigrierten Stand, dann GREEN). Mindest-Smoke:
+   `/healthz` 200 plain, `/readyz` 200/503, `/health/`
+   `application/health+json`, POST 405, kein Locale-/Slash-Redirect.
+   Migrationsdateien durch die **aktuelle** Lint-Config des Projekts
+   schicken (black/isort seit dem CI-Rollout 2026-07).
+7. **Gate**: Projekt-Lint/Tests + `codex review --uncommitted`; P1 fixen
+   und **alle Findings offenlegen**. `manage.py check` clean,
+   `makemigrations --check --dry-run` clean.
+8. **Ein atomarer Commit**, dann MR gegen staging; Auto-Merge nutzen, wo
+   Pipeline-Pflicht besteht; Branch-Cleanup via `--remove-source-branch`.
 
-## Projektprofile
+## Lessons Learned (Wave 1+2)
 
-### leasing (Django 5.2) — fable5
-- Entfernen: `leasing/health_checks.py`, URL-Einträge `/health/`,
-  `/health/simple`, `/healthz`. **Behalten**: `/monitoring/redis/`-Dashboard
-  und `leasing/tasks/redis_health.py` (Monitoring-Consumer!).
-- Alias: `path("health/simple", healthz_liveness)` (externe Monitore).
-- `HEALTHZ`: SERVICE_ID leasing, RELEASE_ID/ENVIRONMENT aus env; CHECKS:
-  database, cache, redis (REDIS_URL), broker, celery_workers
-  {critical: False} + Beat-Schedule `healthz.tasks.probe_workers`
-  (expires 59), filesystem, storage {critical: False, readiness: False},
-  milvus als Custom-Check auf den vorhandenen scribe-Helper
-  {critical: False} — nur wenn der Helper das dict-Contract liefert.
-
-### tinakylau (Django 6.0) — fable5
-- Entfernen: `tinakylau/health_checks.py`, alte `/healthz`- und
-  `/health/`-Views. **Behalten**: `tasks/rabbitmq_health.py`
-  (Deep-Metrics) und das Docker-Healthcheck-Script (Pfad `/healthz`
-  bleibt identisch → Script unverändert lauffähig; verifizieren).
-- `HEALTHZ`: database, cache, broker (amqp), celery_workers
-  {critical: False} + Beat-Schedule, filesystem, staticfiles,
-  storage {critical: False, readiness: False}. E-Mail-Probe: bestehenden
-  Beat-Task behalten und als Custom-Check (Cache-Read, dict-Contract)
-  anbinden, falls trivial — sonst dokumentieren und weglassen.
-
-### acceed (Django 6) — opus4.8
-- Entfernen: `health_check` in `acceed/views.py` + URLs `/healthz`,
-  `/health/`. **Behalten**: `/api/core/health/redis-locks/`
-  (eigenes Feature) und `tasks/redis_health.py`.
-- `HEALTHZ`: database, cache, redis {critical: False}, broker
-  {critical: False}. EXPOSE public (wie bisher kompaktes JSON, aber
-  jetzt leak-frei).
-
-### lexsource (Django 6.0.5) — opus4.8
-- `lexsource/health.py` ersetzen; Pfade `/healthz` + `/readyz` bleiben
-  identisch (gleiche Semantik by design). `SECURE_REDIRECT_EXEMPT`
-  abgleichen.
-- `HEALTHZ`: database, staticfiles, migrations.
-- Bestehende Tests in `lexsource/tests.py` (No-Leak, 503, SSL-Exempt)
-  weitgehend unverändert übernehmen — sie sind die Referenz-Suite.
-
-### jeanmarcel (Django 6.0.5) — opus4.8
-- Entfernen: `health_check` in `jeanmarcel/views.py` + URLs `/health/`,
-  `/healthz`.
-- `HEALTHZ`: database, cache. i18n-Host: Mount außerhalb
-  `i18n_patterns` (Regressionstest).
-
-### arznei-muster-mello (Django 6.0) — sonnet5
-- Entfernen: Inline-`health_check` in `arznei_muster_mello/urls.py`.
-- Zero-Config (database+cache defaults). `/health/` liefert jetzt
-  health+json statt `{"status": "ok"}` — Ansible-HEALTHCHECK und
-  `monitor.sh` nutzen `curl -f` → 200 bleibt 200, kompatibel
-  (verifizieren, sonst auf `/readyz` umstellen und das im Commit
-  dokumentieren). robots.txt-Disallow bleibt.
-
-### expertdaq (Django 5.2) — Wave 2, opus4.8
-- Entfernen: `expertdaq/health_checks.py` (inkl. des nie gerouteten
-  `simple_health_check`-Dead-Codes) + URL-Eintrag `/health/`. Der dort
-  referenzierte Milvus-Check ist seit jeher tot (Import eines nicht
-  existierenden Moduls, permanent `skipped`) — ersatzlos streichen, es
-  sei denn, ein funktionierender scribe-Helper mit dict-Contract ist
-  vorhanden. **Behalten**: `expertdaq/tasks/redis_health.py`
-  (Beat-Metriken, auch wenn aktuell nicht exponiert).
-- `HEALTHZ`: SERVICE_ID expertdaq; CHECKS: database, cache
-  (memcached-Backend über Django-Cache — kein eigener Alias nötig),
-  redis (REDIS_HOST/CELERY_BROKER_URL-Konvention wie leasing), broker
-  {critical: False}, celery_workers {critical: False} + Beat-Schedule
-  `healthz.tasks.probe_workers` (expires 59), filesystem, storage
-  {critical: False, readiness: False}.
-- Alter Pfad `/health/` bleibt von dj-healthz serviert (JSON-Format
-  ändert sich auf health+json — Statuscodes bleiben 200/503).
-
-## Verifikation (pro Projekt, sonnet5)
-
-- `manage.py check` ohne healthz-Errors; `manage.py makemigrations
-  --check --dry-run` clean (dj-healthz hat keine Models).
-- Projekt-Testsuite grün; Health-Smoke-Tests grün.
-- `git diff main..feat/dj-healthz --stat` enthält nur Migrations-Dateien.
-- Alte extern konsumierte Pfade antworten weiterhin 200.
-
-## Rollout nach Merge (manuell, später)
-
-- Branch mergen, deployen; externe Monitore auf `/healthz` (Liveness)
-  bzw. Container-Healthchecks auf `/readyz` umstellen (Docker/Ansible
-  HEALTHCHECK-Snippets im README).
+- **Parallel laufende Rollouts einplanen:** Der CI-Templates-Rollout
+  (repo-weites black/isort-Reformat) landete mitten in der Migration auf
+  staging — alle Branches mussten einmal rebased werden. Vor dem Merge
+  `git fetch` + Konfliktcheck.
+- **Runner-Kapazität:** Beide CI-Runner haben 38 GB Disk. Mehrere parallele
+  `build-base`-Jobs (leasing: texlive, 6-GB-Image) füllen sie transient →
+  Kaskadenfehler ("no space left", initdb-Fail, exit 127). Bei CI-Rot immer
+  das `runner`-Feld des Jobs prüfen (es gibt ci-runner1 **und** ci-runner2)
+  und `docker volume prune -af` (benannte Volumes!) + alte
+  Content-Hash-Base-Images aufräumen.
+- **Semantik-Änderungen dokumentieren:** 500→503 bei Dependency-Ausfall und
+  health+json statt Ad-hoc-JSON sind für Konsumenten Breaking Changes — im
+  MR benennen, Konsumenten vorher greppen (investorselects 307-Falle und
+  jeanmarcels JSON-Parser waren die Lehrstücke aus SURVEY/Review).

@@ -1,5 +1,11 @@
 # dj-healthz — Implementation Plan
 
+> **Status: abgeschlossen (2026-07-02).** Alle Phasen umgesetzt, Paket auf
+> GitHub (public) + GitLab, 196 Tests grün auf Django 5.2/6.0, alle 7
+> Host-Projekte migriert und gemerged — Details im
+> [Ergebnis-Abschnitt](#ergebnis-2026-07-02) und in
+> [MIGRATION.md](MIGRATION.md).
+
 Basis: [SPEC.md](SPEC.md). Jeder Task = ein TDD-Zyklus (Test zuerst, RED
 bestätigen, minimal implementieren, GREEN, Refactor) = ein atomarer Commit.
 Tasks sind sequenziell, außer als **[independent]** markiert.
@@ -164,3 +170,28 @@ separates Folgeprojekt pro Repo).
 - **celery_workers ohne Beat** — Check meldet dann dauerhaft error; Doku:
   nur aktivieren, wenn der Beat-Task eingerichtet ist (System-Check-Warnung
   W002, wenn Check aktiv aber Celery fehlt).
+
+## Ergebnis (2026-07-02)
+
+- **T0–T16 umgesetzt** wie geplant (Workflows: Core sequenziell, 9 Checks
+  parallel, Integration-Gate). Endstand: **196 Tests**, flake8/isort clean.
+- **T18 Fleet-Verifikation**: Django-5.2- und Optional-Deps-Matrix + 9
+  Host-Simulationen, alle bestanden. Gefundene und gefixte Defekte:
+  Token-Compare-500 bei Non-ASCII-Headern (P1), Celery-Test-Determinismus
+  (P1), ungeschützter Result-Cache, DoS über unauthorisierte Deep-Checks,
+  E002 für fehlende Settings-Konfiguration, Host-agnostische Tests.
+- **T19 Gate**: codex-Review-Runden fanden zusätzlich die Late-Finish-
+  Timeout-Lücke im Runner (P1, gefixt), Fail-Closed für unbekannte
+  EXPOSE-Werte (+ System-Check **E004**, über den Plan hinaus),
+  Cache-Alias-`is_configured`. Nachgelagerter Hotfix aus der Migration:
+  kombu 5.x liefert lazy Module mit `__spec__=None` — E002-Scan crashte
+  `manage.py check` (gefixt + Regressionstests).
+- **Abweichungen vom Plan**: W002 (celery_workers ohne Celery) wurde nicht
+  implementiert — stattdessen deckt E002/`is_configured` den Fall ab;
+  `/health/`-Auth in Token-/Staff-Modus führt für Unauthorisierte nur
+  kritische Readiness-Checks aus (DoS-Härtung, in SPEC nachgezogen).
+- **Backlog**: Cache-Alias-Option für `celery_workers`/`probe_workers`
+  (expertdaq braucht einen web/worker-geteilten Store); optionale
+  Budget-Begrenzung der Result-Cache-Zugriffe (Known Limitation im README).
+- **Rollout**: alle 7 Projekte migriert und in staging gemerged —
+  Statustabelle und Lessons Learned in [MIGRATION.md](MIGRATION.md).

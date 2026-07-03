@@ -4,6 +4,11 @@ Reusable Django app `healthz` that provides state-of-the-art (2026) health-check
 endpoints for every addvendo Django project, replacing the hand-rolled
 implementations surveyed in [SURVEY.md](SURVEY.md).
 
+> **Status:** implementiert und ausgerollt (2026-07-02) — 196 Tests, Django
+> 5.2/6.0, alle 7 Zielprojekte migriert ([MIGRATION.md](MIGRATION.md)).
+> Dieses Dokument ist der Verhaltensvertrag; Abweichungen/Backlog im
+> [PLAN.md-Ergebnis](PLAN.md#ergebnis-2026-07-02).
+
 ## 1. Goals
 
 - One package, zero copy-paste: `pip/poetry add` + `INSTALLED_APPS` + one `include()`.
@@ -127,7 +132,14 @@ Mapping to health+json: `ok→pass`, `skipped→pass` (annotated), `error→fail
 - Checks run through a `ThreadPoolExecutor` with a **per-check timeout**
   (default 5 s, per-check override) and an **overall budget**
   (default 10 s). A timed-out check reports `error` with
-  `error_class: "Timeout"`; remaining checks still report.
+  `error_class: "Timeout"`; remaining checks still report. The deadline is
+  additionally enforced in the worker itself: a check that *finishes* after
+  its timeout (while the collector was blocked on a slower sibling) still
+  reports `Timeout` — late results never count as healthy.
+- The result cache is **outage-safe** (get/set failures fall back to live
+  execution) but its own latency is not budget-bounded — documented as a
+  known limitation: enable `CACHE_SECONDS` only on backends with short
+  socket timeouts.
 - Concurrent execution keeps `/health/` latency ≈ slowest check, not the sum
   (the fleet runs ASGI/Daphne — a slow sequential health view ties up workers).
 - Optional short **result cache** (`CACHE_SECONDS`, default 0 = off) via
